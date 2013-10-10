@@ -26,6 +26,7 @@
 # SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import curses
+import curses.textpad
 import os
 import time
 import locale
@@ -295,12 +296,15 @@ def main():
         playlist_ids = api.get_all_playlist_ids()
         playlists = list_playlists(api,playlist_ids)
 
+        search_results = []
+
         scr.clear()
         toplevel = { "name":"Toplevel",
                      "subtree":[ {"name":"Artists", "subtree":artists, "subtreeline":0 },
                                  {"name":"Albums", "subtree":albums, "subtreeline":0 },
                                  {"name":"Songs", "subtree":library, "subtreeline":0 },
-                                 {"name":"Playlists", "subtree":playlists, "subtreeline":0 }],
+                                 {"name":"Playlists", "subtree":playlists, "subtreeline":0 },
+                                 {"name":"Search Results", "subtree":search_results, "subtreeline":0 } ],
                      "subtreeline":0 }
 
         c_menu = toplevel
@@ -405,6 +409,17 @@ def main():
                 if c_item > 0:
                     c_item -= 1
                 c_menu["subtreeline"] = c_item
+            elif c == curses.KEY_F1:
+                # Search for artist
+                search_results[:] = []
+                scr.clear()
+                search_box = curses.textpad.Textbox(scr)
+                text = search_box.edit()
+                query = unicode(search_box.gather())
+
+                for artist in artists:
+                   if artist['name'].find(query.strip()) != -1:
+                       search_results.append(artist)
             elif c == ord(' '):
                 if status == 'Playing:':
                     status = 'Paused:'
