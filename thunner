@@ -470,6 +470,8 @@ def main():
         scrrelease(scr)
         if api:
             api.logout()
+        if wb:
+            wb.logout()
     return
 
 if __name__ == '__main__':
