@@ -37,7 +37,7 @@ import signal
 
 from Queue import Queue, Empty
 from threading import Thread
-from gmusicapi import Webclient
+from gmusicapi import Mobileclient, Webclient
 from getpass import getpass
 from operator import itemgetter
 
@@ -106,9 +106,12 @@ def name_colors(colordefs):
     return colormap
 
 def apiinit(email,password):
-    api = Webclient()
+    # Logging in twice is dumb, but Webclient is necessary for get_stream_urls
+    api = Mobileclient()
+    wb = Webclient()
     api.login(email, password)
-    return api
+    wb.login(email, password)
+    return (api, wb)
 
 def scrinit():
     stdscr = curses.initscr()
@@ -174,7 +177,7 @@ def drawlist(scr,list_height,width,offset,songs,item,code,colors,colormap):
         if i < n_songs:
             song = songs[i]
             if "id" in song:
-                s = str(song['track']) + '. ' + song['name']
+                s = str(song['trackNumber']) + '. ' + song['title']
             else:
                 s = song["name"]
             slen = len(s)
@@ -231,7 +234,7 @@ def gen_trees(library):
             if album == "":
                 album_name = "Untitled Album"
             albums_of_artist.append({ "name":album_name,
-                                      "subtree":sorted(tracks,key=itemgetter('track')),
+                                      "subtree":sorted(tracks,key=itemgetter('trackNumber')),
                                       "subtreeline":0 })
         albums = albums + albums_of_artist
         artists.append({ "name":artist,
@@ -239,12 +242,26 @@ def gen_trees(library):
                          "subtreeline":0 })
     return sorted(artists, key=lambda x: x['name'].lower()), sorted(albums, key=lambda x: x['name'].lower())
 
-def list_playlists(api,playlist_ids):
-    playlists = []
-    for name,pids in playlist_ids['user'].iteritems():
-        for pid in pids:
-            playlists.append( { "name":name, "subtree":api.get_playlist_songs(pid), "subtreeline":0 } )
-    return playlists
+def list_playlists(library, playlists):
+    # New function to build the playlists using Mobileclient...nothing says
+    # efficient like three nested loops
+    # Construct the playlists
+    lists = {}
+    for playlist in playlists:
+        lists.update({playlist['name']: []})
+        temp = []
+        for song in library:
+            for track in playlist['tracks']:
+                if track['trackId'] == song['id']:
+                    temp.append(song)
+        lists.update({playlist['name']: temp})
+
+    # Construct the lists for the actual menu
+    menu_items = []
+    for name in lists.keys():
+        menu_items.append({"name": name, "subtree": lists.get(name, []), "subtreeline": 0})
+
+    return menu_items
 
 def headphones(scr,height,code):
     try:
@@ -284,17 +301,18 @@ def main():
 
         scr.refresh()
 
-        api = apiinit(config['email'],config['pass'])
+        (api, wb) = apiinit(config['email'],config['pass'])
 
         if not api.is_authenticated():
             print "Credentials were not accepted. Exiting..."
             return
 
         library = api.get_all_songs()
+
         artists, albums = gen_trees(library)
 
-        playlist_ids = api.get_all_playlist_ids()
-        playlists = list_playlists(api,playlist_ids)
+        playlist_ids = api.get_all_user_playlist_contents()
+        playlists = list_playlists(library, playlist_ids)
 
         search_results = []
 
@@ -308,6 +326,7 @@ def main():
                      "subtreeline":0 }
 
         c_menu = toplevel
+
         c_list = c_menu["subtree"]
         c_item = c_menu["subtreeline"]
         c_n = len(c_list)
@@ -342,7 +361,7 @@ def main():
                     # Song has stopped playing
                     q_n = (q_n + 1) % len(queue)
                     song = queue[q_n]
-                    playing = play(api.get_stream_urls(song['id'])[0])
+                    playing = play(wb.get_stream_urls(song['id'])[0])
                     current_song = song
             elif c == ord('q'):
                 if isinstance(playing, subprocess.Popen):
@@ -377,13 +396,13 @@ def main():
                         song = queue[q_n]
                         current_song = song
                         status = 'Playing:'
-                        playing = play(api.get_stream_urls(song['id'])[0])
+                        playing = play(wb.get_stream_urls(song['id'])[0])
             elif c == ord('.'):
                 if isinstance(playing, subprocess.Popen):
                     playing.terminate()
                     q_n = (q_n + 1) % len(queue)
                     song = queue[q_n]
-                    playing = play(api.get_stream_urls(song['id'])[0])
+                    playing = play(wb.get_stream_urls(song['id'])[0])
                     current_song = song
                     status = 'Playing:'
             elif c == ord(','):
@@ -391,7 +410,7 @@ def main():
                     playing.terminate()
                     q_n = (q_n - 1) % len(queue)
                     song = queue[q_n]
-                    playing = play(api.get_stream_urls(song['id'])[0])
+                    playing = play(wb.get_stream_urls(song['id'])[0])
                     current_song = song
                     status = 'Playing:'
             elif c == curses.KEY_LEFT:
@@ -442,7 +461,7 @@ def main():
                                          (' ','text'),
                                          (current_song['artist'],'current-artist'),
                                          (' - ','footer-sep'),
-                                         (current_song['name'],'current-song')],code,colors,colormap)
+                                         (current_song['title'],'current-song')],code,colors,colormap)
             drawlist(scr,viewheight,width,header_height,c_list,c_item,code,colors,colormap)
             scr.refresh()
     finally:
